@@ -1,0 +1,8 @@
+services:
+  django:
+    image: lp2t2x-app:${GIT_COMMIT}
+    ports:
+      - "80:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000

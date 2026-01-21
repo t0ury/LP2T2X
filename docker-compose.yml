@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
     django:
         image: django-docker:0.0.1
