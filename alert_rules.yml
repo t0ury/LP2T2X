@@ -1,0 +1,20 @@
+groups:
+  - name: app_alerts
+    rules:
+      - alert: AppDown
+        expr: up{job="app"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Application is down"
+          description: "The application has been unreachable for more than 30 seconds."
+
+      - alert: HighResponseTime
+        expr: http_request_duration_seconds > 2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response time detected"
+          description: "Response time is above 2 seconds."

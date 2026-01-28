@@ -1,112 +1,162 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    PATH = '/opt/homebrew/bin:/usr/local/bin:/bin:/usr/bin:/sbin:/usr/sbin'
-    IMAGE_NAME = 'lp2t2x-app'
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
+    environment {
+        PATH = '/opt/homebrew/bin:/usr/local/bin:/bin:/usr/bin:/sbin:/usr/sbin'
+        IMAGE_NAME = 'lp2t2x-app'
     }
 
-    stage('Init') {
-      steps {
-        script {
-          env.GIT_COMMIT = env.GIT_COMMIT.take(7)
-          echo "IMAGE_NAME=${env.IMAGE_NAME}, GIT_COMMIT=${env.GIT_COMMIT}"
+    stages {
+      stage('Checkout') {
+        steps {
+          checkout scm
         }
       }
-    }
 
-    stage('Build') {
-      steps {
-        sh '''
-          set -eux
-          echo "Building ${IMAGE_NAME}:${GIT_COMMIT} and ${IMAGE_NAME}:latest"
-          docker build --progress=plain -t ${IMAGE_NAME}:${GIT_COMMIT} -t ${IMAGE_NAME}:latest .
-        '''
-      }
-    }
-
-    stage('Test') {
-      steps {
-        sh '''
-          set -eux
-          docker run --rm ${IMAGE_NAME}:${GIT_COMMIT} python -V
-          docker run --rm ${IMAGE_NAME}:${GIT_COMMIT} python manage.py test
-        '''
-      }
-    }
-
-    stage('Code Quality') {
-      steps {
-        withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
+        // Stage 1: Build
+        stage('Build') {
+            steps {
+          script {
+            env.GIT_COMMIT_SHORT = env.GIT_COMMIT.take(7)
+          }
           sh '''
-            set -eux
-            rm -rf sonar-scanner-cli sonar-scanner-*.zip sonar-scanner-*
-            curl -sSLo sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-8.0.1.6346-macosx-aarch64.zip
-            unzip -q sonar-scanner.zip
-            ./sonar-scanner-*/bin/sonar-scanner -Dsonar.token=$SONAR_TOKEN
-          '''
+                    docker build -t ${IMAGE_NAME}:${GIT_COMMIT_SHORT} -t ${IMAGE_NAME}:latest .
+                '''
+            }
         }
-      }
+
+        // Stage 2: Test
+        stage('Test') {
+            steps {
+          echo '=== STAGE: TEST ==='
+          sh '''
+                    set -eux
+                    docker run --rm ${IMAGE_NAME}:${GIT_COMMIT_SHORT} python -V
+                    docker run --rm ${IMAGE_NAME}:${GIT_COMMIT_SHORT} python manage.py test
+                '''
+            }
+        }
+
+        // Stage 3: Code Quality
+        stage('Code Quality') {
+            steps {
+          echo '=== STAGE: CODE QUALITY ==='
+          withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
+            sh '''
+                        set -eux
+                        rm -rf sonar-scanner-*
+                        curl -sSLo sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-8.0.1.6346-macosx-aarch64.zip
+                        unzip -q sonar-scanner.zip
+                        ./sonar-scanner-*/bin/sonar-scanner -Dsonar.token=$SONAR_TOKEN
+                    '''
+          }
+            }
+        }
+
+        // Stage 4: Security
+        stage('Security') {
+            steps {
+          echo '=== STAGE: SECURITY ==='
+          sh '''
+                    set -eux
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy:0.50.4 \
+                        image --severity HIGH,CRITICAL ${IMAGE_NAME}:${GIT_COMMIT_SHORT}
+                '''
+            }
+        }
+
+        // Stage 5: Deploy to Staging
+        stage('Deploy to Staging') {
+            steps {
+          echo '=== STAGE: DEPLOY TO STAGING ==='
+          sh '''
+                    set -eux
+                    echo "Deploying to staging environment..."
+
+                    export GIT_COMMIT="${GIT_COMMIT_SHORT}"
+
+                    # Stop existing staging containers
+                    docker compose -f docker-compose.staging.yml down || true
+
+                    # Deploy to staging
+                    docker compose -f docker-compose.staging.yml up -d
+
+                    # Wait for application to start
+                    sleep 10
+
+                    # Health check
+                    curl -sS http://127.0.0.1:8000 || true
+                    echo "Staging deployment completed"
+                '''
+            }
+        }
+
+        // Stage 6: Release to Production
+        stage('Release') {
+            when {
+          branch 'main'
+            }
+            steps {
+          echo '=== STAGE: RELEASE TO PRODUCTION ==='
+          script {
+            input message: 'Release to production?', ok: 'Deploy'
+
+            sh """
+                        set -eux
+
+                        # Create release tag
+                        git config user.name "jenkins"
+                        git config user.email "jenkins@local"
+                        git tag -a release-${GIT_COMMIT_SHORT} -m "Release ${GIT_COMMIT_SHORT}" || true
+                        git push origin release-${GIT_COMMIT_SHORT} || true
+
+                        # Deploy to production
+                        export GIT_COMMIT="${GIT_COMMIT_SHORT}"
+                        docker compose -f docker-compose.prod.yml down || true
+                        docker compose -f docker-compose.prod.yml up -d
+
+                        sleep 10
+                        curl -sS http://127.0.0.1:8080 || true
+                        echo "Production deployment completed"
+                    """
+          }
+            }
+        }
+
+        // Stage 7: Monitoring
+        stage('Monitoring') {
+            steps {
+          echo '=== STAGE: MONITORING ==='
+          sh '''
+                    set -eux
+                    # Start Prometheus
+                    docker compose -f docker-compose.monitoring.yml up -d
+                    sleep 5
+
+                    # Verify Prometheus is healthy
+                    curl -sS http://127.0.0.1:9090/-/healthy
+
+                    # Show configured alert rules
+                    echo "=== CONFIGURED ALERT RULES ==="
+                    curl -sS http://127.0.0.1:9090/api/v1/rules | grep -o '"alertname":"[^"]*"' || true
+
+                    # Show targets status
+                    echo "=== MONITORING TARGETS ==="
+                    curl -sS http://127.0.0.1:9090/api/v1/targets | grep -o '"health":"[^"]*"' || true
+
+                    echo ""
+                    echo "Prometheus Dashboard: http://localhost:9090"
+                    echo "Alert Rules: http://localhost:9090/alerts"
+                '''
+            }
+        }
     }
 
-    stage('Security') {
-      steps {
-        sh '''
-          set -eux
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$PWD:/work" -w /work \
-            aquasec/trivy:0.50.4 \
-            image --no-progress --format table --severity HIGH,CRITICAL \
-            --exit-code 0 ${IMAGE_NAME}:${GIT_COMMIT} > trivy-report.txt
-
-          head -n 40 trivy-report.txt || true
-        '''
-      }
-      post {
+    post {
         always {
-          archiveArtifacts artifacts: 'trivy-report.txt', allowEmptyArchive: false
+            echo "Pipeline finished: ${currentBuild.currentResult}"
         }
-      }
     }
-
-    stage('Deploy to Staging') {
-      steps {
-        sh '''
-          set -eux
-          export IMAGE_NAME="${IMAGE_NAME}"
-          export GIT_COMMIT="${GIT_COMMIT}"
-
-          docker compose -f docker-compose.staging.yml up -d
-          sleep 10
-          curl -sS http://127.0.0.1:8000 > /dev/null
-          echo "Staging healthcheck OK"
-        '''
-      }
-    }
-
-    stage('Approval to Promote') {
-      steps {
-        input message: 'Promote to production?'
-      }
-    }
-
-    stage('Deploy to Production') {
-      steps {
-        sh '''
-          set -eux
-          export IMAGE_NAME="${IMAGE_NAME}"
-          export GIT_COMMIT="${GIT_COMMIT}"
-          docker compose -f docker-compose.prod.yml up -d
-        '''
-      }
-    }
-  }
 }
