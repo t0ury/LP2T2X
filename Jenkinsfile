@@ -28,7 +28,6 @@ pipeline {
         // Stage 2: Test
         stage('Test') {
       steps {
-          echo '=== STAGE: TEST ==='
           sh '''
                     set -eux
                     docker run --rm ${IMAGE_NAME}:${GIT_COMMIT_SHORT} python -V
@@ -40,7 +39,6 @@ pipeline {
         // Stage 3: Code Quality
         stage('Code Quality') {
       steps {
-          echo '=== STAGE: CODE QUALITY ==='
           withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
             sh '''
                         set -eux
@@ -56,7 +54,6 @@ pipeline {
         // Stage 4: Security
         stage('Security') {
       steps {
-          echo '=== STAGE: SECURITY ==='
           sh '''
                     set -eux
                     docker run --rm \
@@ -70,7 +67,6 @@ pipeline {
         // Stage 5: Deploy to Staging
         stage('Deploy to Staging') {
       steps {
-          echo '=== STAGE: DEPLOY TO STAGING ==='
           sh '''
                     set -eux
                     echo "Deploying to staging environment..."
@@ -95,37 +91,31 @@ pipeline {
 
         // Stage 6: Release to Production
         stage('Release') {
-      steps {
-          echo '=== STAGE: RELEASE TO PRODUCTION ==='
-          script {
-            input message: 'Release to production?', ok: 'Deploy'
-
+          steps {
             sh """
-                        set -eux
+                set -eux
 
-                        # Create release tag
-                        git config user.name "jenkins"
-                        git config user.email "jenkins@local"
-                        git tag -a release-${GIT_COMMIT_SHORT} -m "Release ${GIT_COMMIT_SHORT}" || true
-                        git push origin release-${GIT_COMMIT_SHORT} || true
+                # Create release tag
+                git config user.name "jenkins"
+                git config user.email "jenkins@local"
+                git tag -a release-${GIT_COMMIT_SHORT} -m "Release ${GIT_COMMIT_SHORT}" || true
+                git push origin release-${GIT_COMMIT_SHORT} || true
 
-                        # Deploy to production
-                        export GIT_COMMIT="${GIT_COMMIT_SHORT}"
-                        docker compose -f docker-compose.prod.yml down --remove-orphans || true
-                        docker compose -f docker-compose.prod.yml up -d
+                # Deploy to production
+                export GIT_COMMIT="${GIT_COMMIT_SHORT}"
+                docker compose -f docker-compose.prod.yml down --remove-orphans || true
+                docker compose -f docker-compose.prod.yml up -d
 
-                        sleep 10
-                        curl -sS http://127.0.0.1:8080 || true
-                        echo "Production deployment completed"
-                    """
-          }
+                sleep 10
+                curl -sS http://127.0.0.1:8080 || true
+                echo "Production deployment completed"
+              """
       }
         }
 
         // Stage 7: Monitoring
         stage('Monitoring') {
       steps {
-          echo '=== STAGE: MONITORING ==='
           sh '''
                     set -eux
                     # Start Prometheus
