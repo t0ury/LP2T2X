@@ -78,7 +78,7 @@ pipeline {
                     export GIT_COMMIT="${GIT_COMMIT_SHORT}"
 
                     # Stop existing staging containers
-                    docker compose -f docker-compose.staging.yml down || true
+                    docker compose -f docker-compose.staging.yml down --remove-orphans || true
 
                     # Deploy to staging
                     docker compose -f docker-compose.staging.yml up -d
@@ -114,7 +114,7 @@ pipeline {
 
                         # Deploy to production
                         export GIT_COMMIT="${GIT_COMMIT_SHORT}"
-                        docker compose -f docker-compose.prod.yml down || true
+                        docker compose -f docker-compose.prod.yml down --remove-orphans || true
                         docker compose -f docker-compose.prod.yml up -d
 
                         sleep 10
@@ -132,6 +132,7 @@ pipeline {
           sh '''
                     set -eux
                     # Start Prometheus
+                    docker compose -f docker-compose.monitoring.yml down --remove-orphans || true
                     docker compose -f docker-compose.monitoring.yml up -d
                     sleep 5
 
