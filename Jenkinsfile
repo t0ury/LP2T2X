@@ -15,31 +15,31 @@ pipeline {
 
         // Stage 1: Build
         stage('Build') {
-            steps {
+      steps {
           script {
             env.GIT_COMMIT_SHORT = env.GIT_COMMIT.take(7)
           }
           sh '''
                     docker build -t ${IMAGE_NAME}:${GIT_COMMIT_SHORT} -t ${IMAGE_NAME}:latest .
                 '''
-            }
+      }
         }
 
         // Stage 2: Test
         stage('Test') {
-            steps {
+      steps {
           echo '=== STAGE: TEST ==='
           sh '''
                     set -eux
                     docker run --rm ${IMAGE_NAME}:${GIT_COMMIT_SHORT} python -V
                     docker run --rm ${IMAGE_NAME}:${GIT_COMMIT_SHORT} python manage.py test
                 '''
-            }
+      }
         }
 
         // Stage 3: Code Quality
         stage('Code Quality') {
-            steps {
+      steps {
           echo '=== STAGE: CODE QUALITY ==='
           withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
             sh '''
@@ -50,12 +50,12 @@ pipeline {
                         ./sonar-scanner-*/bin/sonar-scanner -Dsonar.token=$SONAR_TOKEN
                     '''
           }
-            }
+      }
         }
 
         // Stage 4: Security
         stage('Security') {
-            steps {
+      steps {
           echo '=== STAGE: SECURITY ==='
           sh '''
                     set -eux
@@ -64,12 +64,12 @@ pipeline {
                         aquasec/trivy:0.50.4 \
                         image --severity HIGH,CRITICAL ${IMAGE_NAME}:${GIT_COMMIT_SHORT}
                 '''
-            }
+      }
         }
 
         // Stage 5: Deploy to Staging
         stage('Deploy to Staging') {
-            steps {
+      steps {
           echo '=== STAGE: DEPLOY TO STAGING ==='
           sh '''
                     set -eux
@@ -90,15 +90,12 @@ pipeline {
                     curl -sS http://127.0.0.1:8000 || true
                     echo "Staging deployment completed"
                 '''
-            }
+      }
         }
 
         // Stage 6: Release to Production
         stage('Release') {
-            when {
-          branch 'main'
-            }
-            steps {
+      steps {
           echo '=== STAGE: RELEASE TO PRODUCTION ==='
           script {
             input message: 'Release to production?', ok: 'Deploy'
@@ -122,12 +119,12 @@ pipeline {
                         echo "Production deployment completed"
                     """
           }
-            }
+      }
         }
 
         // Stage 7: Monitoring
         stage('Monitoring') {
-            steps {
+      steps {
           echo '=== STAGE: MONITORING ==='
           sh '''
                     set -eux
@@ -151,13 +148,13 @@ pipeline {
                     echo "Prometheus Dashboard: http://localhost:9090"
                     echo "Alert Rules: http://localhost:9090/alerts"
                 '''
-            }
+      }
         }
     }
 
     post {
         always {
-            echo "Pipeline finished: ${currentBuild.currentResult}"
+      echo "Pipeline finished: ${currentBuild.currentResult}"
         }
     }
 }
